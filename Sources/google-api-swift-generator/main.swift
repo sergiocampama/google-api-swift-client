@@ -42,7 +42,7 @@ func createInitLines(baseIndent: Int, parentName: String?, parameters: [String: 
         }
         return (key: "\(tmpKey)", type: "\(value.Type(objectName: typeName))?")
       }
-  let inputSignature = inputs.map { "\($0.key): \($0.type)" }.joined(separator: ", ")
+  let inputSignature = inputs.map { "\($0.key): \($0.type) = nil" }.joined(separator: ", ")
   let assignments = inputs.reduce("") { (prev: String, curr: (key: String, type: String)) -> String in
     let nextItem = String(repeating: " ", count: 12) + "self.\(curr.key) = \(curr.key)"
     if prev.isEmpty { return "\n" + nextItem }
