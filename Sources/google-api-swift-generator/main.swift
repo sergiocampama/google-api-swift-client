@@ -42,7 +42,9 @@ func createInitLines(baseIndent: Int, parentName: String?, parameters: [String: 
         }
         return (key: "\(tmpKey)", type: "\(value.Type(objectName: typeName))?")
       }
-  let inputSignature = inputs.map { "\($0.key): \($0.type) = nil" }.joined(separator: ", ")
+  let inputSignature = "\n" + inputs.map {
+    String(repeating: " ", count: 12) + "\($0.key): \($0.type) = nil"
+  }.joined(separator: ",\n") + "\n" + String(repeating: " ", count: 8)
   let assignments = inputs.reduce("") { (prev: String, curr: (key: String, type: String)) -> String in
     let nextItem = String(repeating: " ", count: 12) + "self.\(curr.key) = \(curr.key)"
     if prev.isEmpty { return "\n" + nextItem }
@@ -238,26 +240,30 @@ extension Discovery.Method {
     for p in parameters.sorted(by:  { $0.key < $1.key }) {
       classProperties.addLine(indent:8, "public let \(p.key.camelCased()): \(p.value.Type())?")
     }
-    
-    let queryParameterItems = parameters
-        .sorted(by: { $0.key < $1.key })
-        .filter { if let location = $0.value.location { return location == "query" } else { return false } }
-        .map { return "\"\($0.key.camelCased())\"" }
-        .joined(separator: ",")
+
+    let filteredQueryParameterItems = parameters
+      .sorted(by: { $0.key < $1.key })
+      .filter { if let location = $0.value.location { return location == "query" } else { return false } }
+
+    let queryParameterItems = filteredQueryParameterItems
+        .map { return String(repeating: " ", count: 16) + "\"\($0.key.camelCased())\"" }
+        .joined(separator: ",\n") + ",\n" + String(repeating: " ", count: 12)
     let queryParametersDef = """
             public func queryParameters() -> [String] {
-                [\(queryParameterItems)]
+                [\(!filteredQueryParameterItems.isEmpty ? "\n\(queryParameterItems)" : "")]
             }
     """
-    
-    let pathParameterItems = parameters
-        .sorted(by: { $0.key < $1.key })
-        .filter { if let location = $0.value.location { return location == "path" } else { return false } }
-        .map { return "\"\($0.key.camelCased())\"" }
-        .joined(separator: ",")
+
+    let filteredPathParameterItems = parameters
+      .sorted(by: { $0.key < $1.key })
+      .filter { if let location = $0.value.location { return location == "path" } else { return false } }
+
+    let pathParameterItems = filteredPathParameterItems
+      .map { return String(repeating: " ", count: 16) + "\"\($0.key.camelCased())\"" }
+      .joined(separator: ",\n") + ",\n" + String(repeating: " ", count: 12)
     let pathParametersDef = """
             public func pathParameters() -> [String] {
-                [\(pathParameterItems)]
+                [\(!filteredPathParameterItems.isEmpty ? "\n\(pathParameterItems)" : "")]
             }
     """
     
