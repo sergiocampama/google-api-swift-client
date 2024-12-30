@@ -40,7 +40,7 @@ func createInitLines(baseIndent: Int, parentName: String?, parameters: [String: 
         if tmpKey == "self" {
           tmpKey = "selfRef"
         }
-        return (key: "`\(tmpKey)`", type: "\(value.Type(objectName: typeName))?")
+        return (key: "\(tmpKey)", type: "\(value.Type(objectName: typeName))?")
       }
   let inputSignature = inputs.map { "\($0.key): \($0.type)" }.joined(separator: ", ")
   let assignments = inputs.reduce("") { (prev: String, curr: (key: String, type: String)) -> String in
@@ -180,13 +180,13 @@ func createStaticNestedObject(parentName: String?, name: String, schema: Schema,
   var assignments = ""
   for p in schema.properties!.sorted(by: { $0.key.camelCased() < $1.key.camelCased() }) {
     let assignment = try createSchemaAssignment(parentName: parentName, name: name, schema: p, stringUnderConstruction: &stringUnderConstruction)
-    assignments.addLine(indent: 8, "public var `\(assignment.key)`: \(assignment.type)?")
+    assignments.addLine(indent: 8, "public var \(assignment.key): \(assignment.type)?")
   }
   //todo: add comments for class
   let escapingNames = ["Type", "Error"]
   let className = escapingNames.contains(name) ? "Custom_" + name : name
   let def = """
-    public class \(className): Codable {
+    public class \(className): Codable, Sendable {
       \(initializer)\(!codingKeys.isEmpty ? "\n\(codingKeys)" : "")
   \(assignments)    }
   
@@ -236,7 +236,7 @@ extension Discovery.Method {
     let codingKeys = createCodingKeys(baseIndent: 4, parentName: nil, parameters: parameters)
     var classProperties = ""
     for p in parameters.sorted(by:  { $0.key < $1.key }) {
-      classProperties.addLine(indent:8, "public var `\(p.key.camelCased())`: \(p.value.Type())?")
+      classProperties.addLine(indent:8, "public var \(p.key.camelCased()): \(p.value.Type())?")
     }
     
     let queryParameterItems = parameters
@@ -262,7 +262,7 @@ extension Discovery.Method {
     """
     
     return """
-        public class \(ParametersTypeName(resource:resource, method:method)): Parameterizable {
+        public class \(ParametersTypeName(resource:resource, method:method)): Parameterizable, Sendable {
         \(initializer)
     \(codingKeys)
     \(classProperties)
@@ -286,31 +286,53 @@ extension Discovery.Resource {
         let methodName = name.camelCased() + "_" + m.key.upperCamelCased()
         s.addLine()
         s.addLine(indent:4, "public func \(methodName) (")
+
+        var arguments = [String]()
+
         if m.value.HasRequest() {
-          s.addLine(indent:8, "request: \(m.value.RequestTypeName()),")
+          arguments.append("request: \(m.value.RequestTypeName())")
         }
         if m.value.HasParameters() {
-          s.addLine(indent:8, "parameters: \(m.value.ParametersTypeName(resource:name, method:m.key)),")
+          arguments.append("parameters: \(m.value.ParametersTypeName(resource:name, method:m.key))")
         }
-        if m.value.HasResponse() {
-          s.addLine(indent:8, "completion: @escaping (\(m.value.ResponseTypeName())?, Error?) -> ()) throws {")
+
+        let returnSignature = if m.value.HasResponse() {
+          ") async throws -> \(m.value.ResponseTypeName()) {"
         } else {
-          s.addLine(indent:8, "completion: @escaping (Error?) -> ()) throws {")
+          ") async throws {"
         }
-        s.addLine(indent:12, "try perform(")
-        s.addLine(indent:16, "method: \"\(m.value.httpMethod!)\",")
+
+        if arguments.isEmpty {
+          s.addLine(returnSignature)
+        } else {
+          for (index, argument) in arguments.enumerated() {
+            s.addLine(indent: 8, argument + (index < arguments.count - 1 ? "," : ""))
+          }
+          s.addLine(indent: 4, returnSignature)
+        }
+
+        var bodyArguments = [String]()
+
         var path = ""
         if m.value.path != nil {
           path = m.value.path!
         }
-        s.addLine(indent:16, "path: \"\(path)\",")
+
+        bodyArguments.append("method: \"\(m.value.httpMethod!)\"")
+        bodyArguments.append("path: \"\(path)\"")
+
         if m.value.HasRequest() {
-          s.addLine(indent:16, "request: request,")
+          bodyArguments.append("request: request")
         }
         if m.value.HasParameters() {
-          s.addLine(indent:16, "parameters: parameters,")
+          bodyArguments.append("parameters: parameters")
         }
-        s.addLine(indent:16, "completion: completion)")
+
+        s.addLine(indent: 8, "try await perform(")
+        for (index, argument) in bodyArguments.enumerated() {
+          s.addLine(indent: 12, argument + (index < bodyArguments.count - 1 ? "," : ""))
+        }
+        s.addLine(indent:8, ")")
         s.addLine(indent:4, "}")
         s.addLine()
       }
@@ -365,10 +387,10 @@ extension Discovery.Service {
       }
     }
     
-    var generatesResources = ""
+    var generatedResources = ""
     if let resources = resources {
       for r in resources.sorted(by:  { $0.key < $1.key }) {
-        generatesResources += r.value.generate(name: r.key)
+        generatedResources += r.value.generate(name: r.key)
       }
     }
     
@@ -386,7 +408,7 @@ extension Discovery.Service {
     
     \(generatedSchemas)
     
-    \(generatesResources)
+    \(generatedResources)
     }
     """
   }
@@ -429,18 +451,18 @@ func interactiveServiceGeneration() throws {
     print("\(padding + istr)) \(item.title)")
     i += 1
   }
-  var directoryItem: DirectoryItem?
-  repeat {
-    print("Please enter the number corresponding to the service or 0 to exit")
-    print("> ", terminator: "")
-    let input = readLine()
-    if input == "0" {
-      return
-    }
-    if let i = Int(input!), input != nil {
-      directoryItem = map[i]
-    }
-  } while directoryItem == nil
+  var directoryItem: DirectoryItem? = map[248]
+//  repeat {
+//    print("Please enter the number corresponding to the service or 0 to exit")
+//    print("> ", terminator: "")
+//    let input = readLine()
+//    if input == "0" {
+//      return
+//    }
+//    if let i = Int(input!), input != nil {
+//      directoryItem = map[i]
+//    }
+//  } while directoryItem == nil
   try processDiscoveryDocument(url: directoryItem!.discoveryRestUrl, name: directoryItem!.id.replacingOccurrences(of: ":", with: ""))
 }
 

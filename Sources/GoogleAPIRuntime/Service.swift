@@ -23,14 +23,43 @@ enum GoogleAPIRuntimeError: Error {
 public protocol Parameterizable {
   func queryParameters() -> [String]
   func pathParameters() -> [String]
-  func query() -> [String:String]
+  func query() -> [String: String]
   func path(pattern: String) throws -> String
+}
+
+extension Connection {
+  @discardableResult
+  public func performRequest(
+    method: String,
+    urlString: String,
+    parameters: [String: String],
+    body: Data!
+  ) async throws -> Data {
+    try await withCheckedThrowingContinuation { continuation in
+      do {
+        try self.performRequest(
+          method: method,
+          urlString: urlString,
+          parameters: parameters,
+          body: body
+        ) { data, response, error in
+          if let error {
+            continuation.resume(throwing: error)
+          } else if let data {
+            continuation.resume(returning: data)
+          }
+        }
+      } catch {
+        continuation.resume(throwing: error)
+      }
+    }
+  }
 }
 
 extension Parameterizable {
   public func query() -> [String:String] {
     var q : [String:String] = [:]
-    let mirror = Mirror(reflecting:self)
+    let mirror = Mirror(reflecting: self)
     for p in queryParameters() {
       for child in mirror.children {
         if child.label == p {
@@ -48,12 +77,11 @@ extension Parameterizable {
         }
       }
     }
-    print("query: \(q)")
     return q
   }
   public func path(pattern: String) throws -> String {
     var pattern = pattern
-    let mirror = Mirror(reflecting:self)
+    let mirror = Mirror(reflecting: self)
     for p in pathParameters() {
       for child in mirror.children {
         if child.label == p {
@@ -68,7 +96,6 @@ extension Parameterizable {
         }
       }
     }
-    print("path: \(pattern)")
     return pattern
   }
 }
@@ -83,170 +110,137 @@ open class Service {
     self.base = base
   }
   
-  func handleResponse<Z:Decodable>(
-    _ data : Data?,
-    _ response : URLResponse?,
-    _ error : Error?,
-    _ completion : @escaping(Z?, Error?) -> ()) {
-    if let error = error {
-      completion(nil, error)
-    } else if let data = data {
-      print(String(data:data, encoding:.utf8)!)
-      do {
-        let json = try JSONSerialization.jsonObject(with: data, options: [])
-        let decoder = JSONDecoder()
-        if let json = json as? [String:Any] {
-          if let errorPayload = json["error"] as? [String: Any],
-            let code = errorPayload["code"] as? Int {
-              return completion(nil, NSError(
-                domain: "GoogleAPIRuntime",
-                code: code,
-                userInfo: errorPayload))
-          } else if let payload = json["data"] {
-            // remove the "data" wrapper that is used with some APIs (e.g. translate)
-            let payloadData = try JSONSerialization.data(withJSONObject:payload)
-            return completion(try decoder.decode(Z.self, from: payloadData), nil)
-          }
-        }
-        completion(try decoder.decode(Z.self, from: data), nil)
-      } catch {
-        print(String(data:data, encoding:.utf8)!)
-        completion(nil, error)
+  func convertResponse<Z: Decodable>(_ data : Data) throws -> Z {
+    let json = try JSONSerialization.jsonObject(with: data, options: [])
+    let decoder = JSONDecoder()
+    if let json = json as? [String: Any] {
+      if let errorPayload = json["error"] as? [String: Any],
+        let code = errorPayload["code"] as? Int {
+          throw NSError(
+            domain: "GoogleAPIRuntime",
+            code: code,
+            userInfo: errorPayload
+          )
+      } else if let payload = json["data"] {
+        // remove the "data" wrapper that is used with some APIs (e.g. translate)
+        let payloadData = try JSONSerialization.data(withJSONObject: payload)
+        return try decoder.decode(Z.self, from: payloadData)
       }
-    } else {
-      completion(nil, GoogleAPIRuntimeError.invalidResponseFromServer)
     }
+    return try decoder.decode(Z.self, from: data)
   }
   
-  public func perform<Z:Decodable>(
-    method : String,
-    path : String,
-    completion : @escaping(Z?, Error?) -> ()) throws {
-    let postData : Data? = nil
-    try connection.performRequest(
-      method:method,
-      urlString:base + path,
+  public func perform<Z: Decodable>(method: String, path: String) async throws -> Z {
+    let responseData = try await connection.performRequest(
+      method: method,
+      urlString: base + path,
       parameters: [:],
-      body:postData) {(data, response, error) in
-        self.handleResponse(data, response, error, completion)
-    }
+      body: nil
+    )
+    return try self.convertResponse(responseData)
   }
   
-  public func perform<X:Encodable,Z:Decodable>(
+  public func perform<X: Encodable, Z: Decodable>(
     method : String,
     path : String,
-    request : X,
-    completion : @escaping(Z?, Error?) -> ()) throws {
+    request : X
+  ) async throws -> Z {
     let encoder = JSONEncoder()
-    let postData = try encoder.encode(request)
-    try connection.performRequest(
-      method:method,
-      urlString:base + path,
+    let requestData = try encoder.encode(request)
+    let responseData = try await connection.performRequest(
+      method: method,
+      urlString: base + path,
       parameters: [:],
-      body:postData) {(data, response, error) in
-        self.handleResponse(data, response, error, completion)
-    }
+      body: requestData
+    )
+    return try self.convertResponse(responseData)
   }
   
-  public func perform<Y:Parameterizable,Z:Decodable>(
+  public func perform<Y: Parameterizable, Z: Decodable>(
     method : String,
     path : String,
-    parameters : Y,
-    completion : @escaping(Z?, Error?) -> ()) throws {
-    let postData : Data? = nil
-    try connection.performRequest(
-      method:method,
-      urlString:base + parameters.path(pattern:path),
+    parameters : Y
+  ) async throws -> Z {
+    let responseData = try await connection.performRequest(
+      method: method,
+      urlString: base + parameters.path(pattern: path),
       parameters: parameters.query(),
-      body:postData) {(data, response, error) in
-        self.handleResponse(data, response, error, completion)
-    }
+      body: nil
+    )
+    return try self.convertResponse(responseData)
   }
   
-  public func perform<X:Encodable,Y:Parameterizable,Z:Decodable>(
-    method : String,
-    path : String,
-    request : X,
-    parameters : Y,
-    completion : @escaping(Z?, Error?) -> ()) throws {
-    let encoder = JSONEncoder()
-    let postData = try encoder.encode(request)
-    try connection.performRequest(
-      method:method,
-      urlString:base + parameters.path(pattern:path),
-      parameters: parameters.query(),
-      body:postData) {(data, response, error) in
-        self.handleResponse(data, response, error, completion)
-    }
-  }
-  
-  public func perform<X:Encodable,Y:Parameterizable>(
+  public func perform<X: Encodable, Y: Parameterizable, Z: Decodable>(
     method : String,
     path : String,
     request : X,
-    parameters : Y,
-    completion : @escaping(Error?) -> ()) throws {
+    parameters : Y
+  ) async throws -> Z {
     let encoder = JSONEncoder()
-    let postData = try encoder.encode(request)
-    try connection.performRequest(
-      method:method,
-      urlString:base + parameters.path(pattern:path),
+    let requestData = try encoder.encode(request)
+    let responseData = try await connection.performRequest(
+      method: method,
+      urlString: base + parameters.path(pattern: path),
       parameters: parameters.query(),
-      body:postData) {(data, response, error) in
-        self.handleResponse(data, response, error, completion)
-    }
+      body: requestData
+    )
+    return try self.convertResponse(responseData)
   }
   
-  func handleResponse(
-    _ data : Data?,
-    _ response : URLResponse?,
-    _ error : Error?,
-    _ completion : @escaping(Error?) -> ()) {
-    completion(error)
+  public func perform<X: Encodable, Y: Parameterizable>(
+    method : String,
+    path : String,
+    request : X,
+    parameters : Y
+  ) async throws {
+    let encoder = JSONEncoder()
+    let requestData = try encoder.encode(request)
+    try await connection.performRequest(
+      method: method,
+      urlString: base + parameters.path(pattern: path),
+      parameters: parameters.query(),
+      body: requestData
+    )
   }
   
   public func perform(
     method : String,
     path : String,
-    completion : @escaping(Error?) -> ()) throws {
-    let postData : Data? = nil
-    try connection.performRequest(
-      method:method,
-      urlString:base + path,
+    completion : @escaping(Error?) -> ()
+  ) async throws {
+    try await connection.performRequest(
+      method: method,
+      urlString: base + path,
       parameters: [:],
-      body:postData) {(data, response, error) in
-        self.handleResponse(data, response, error, completion)
-    }
+      body: nil
+    )
   }
 
-  public func perform<X:Encodable>(
+  public func perform<X: Encodable>(
     method : String,
     path : String,
-    request : X,
-    completion : @escaping(Error?) -> ()) throws {
+    request : X
+  ) async throws {
     let encoder = JSONEncoder()
-    let postData = try encoder.encode(request)
-    try connection.performRequest(
-      method:method,
-      urlString:base + path,
+    let requestData = try encoder.encode(request)
+    try await connection.performRequest(
+      method: method,
+      urlString: base + path,
       parameters: [:],
-      body:postData) {(data, response, error) in
-        self.handleResponse(data, response, error, completion)
-    }
+      body: requestData
+    )
   }
   
-  public func perform<Y:Parameterizable>(
+  public func perform<Y: Parameterizable>(
     method : String,
     path : String,
-    parameters : Y,
-    completion : @escaping(Error?) -> ()) throws {
-    let postData : Data? = nil
-    try connection.performRequest(
-      method:method,
-      urlString:base + parameters.path(pattern:path),
+    parameters : Y
+  ) async throws {
+    try await connection.performRequest(
+      method: method,
+      urlString: base + parameters.path(pattern: path),
       parameters: parameters.query(),
-      body:postData) {(data, response, error) in
-        self.handleResponse(data, response, error, completion)
-    }
+      body: nil
+    )
   }
 }
