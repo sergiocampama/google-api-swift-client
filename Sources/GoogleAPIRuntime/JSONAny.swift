@@ -15,7 +15,7 @@
 import Foundation
 
 // https://stackoverflow.com/questions/46279992/any-when-decoding-json-with-codable
-public class JSONAny: Codable {
+public class JSONAny: Codable, @unchecked Sendable {
   public let value: Any
 
   static func decodingError(forCodingPath codingPath: [CodingKey]) -> DecodingError {

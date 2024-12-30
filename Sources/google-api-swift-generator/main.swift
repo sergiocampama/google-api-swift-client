@@ -180,13 +180,13 @@ func createStaticNestedObject(parentName: String?, name: String, schema: Schema,
   var assignments = ""
   for p in schema.properties!.sorted(by: { $0.key.camelCased() < $1.key.camelCased() }) {
     let assignment = try createSchemaAssignment(parentName: parentName, name: name, schema: p, stringUnderConstruction: &stringUnderConstruction)
-    assignments.addLine(indent: 8, "public var \(assignment.key): \(assignment.type)?")
+    assignments.addLine(indent: 8, "public let \(assignment.key): \(assignment.type)?")
   }
   //todo: add comments for class
   let escapingNames = ["Type", "Error"]
   let className = escapingNames.contains(name) ? "Custom_" + name : name
   let def = """
-    public class \(className): Codable, Sendable {
+    public final class \(className): Codable, Sendable {
       \(initializer)\(!codingKeys.isEmpty ? "\n\(codingKeys)" : "")
   \(assignments)    }
   
@@ -236,7 +236,7 @@ extension Discovery.Method {
     let codingKeys = createCodingKeys(baseIndent: 4, parentName: nil, parameters: parameters)
     var classProperties = ""
     for p in parameters.sorted(by:  { $0.key < $1.key }) {
-      classProperties.addLine(indent:8, "public var \(p.key.camelCased()): \(p.value.Type())?")
+      classProperties.addLine(indent:8, "public let \(p.key.camelCased()): \(p.value.Type())?")
     }
     
     let queryParameterItems = parameters
@@ -262,7 +262,7 @@ extension Discovery.Method {
     """
     
     return """
-        public class \(ParametersTypeName(resource:resource, method:method)): Parameterizable, Sendable {
+        public final class \(ParametersTypeName(resource:resource, method:method)): Parameterizable, Sendable {
         \(initializer)
     \(codingKeys)
     \(classProperties)
@@ -375,7 +375,7 @@ extension Discovery.Service {
             let codingKeys = createCodingKeys(baseIndent: 4, parentName: nil, parameters: properties)
             generatedSchemas.addLine(codingKeys)
             for p in properties.sorted(by: { $0.key < $1.key }) {
-              generatedSchemas.addLine(indent:4, "public var `\(p.key.camelCased())` : \(p.value.Type())?")
+              generatedSchemas.addLine(indent:4, "public let \(p.key.camelCased()) : \(p.value.Type())?")
             }
           }
           generatedSchemas.addLine("}")
@@ -402,8 +402,8 @@ extension Discovery.Service {
     import GoogleAPIRuntime
     
     public class \(self.name.capitalized()) : Service {
-        public init(tokenProvider: TokenProvider) throws {
-            try super.init(tokenProvider, "\(self.baseUrl)")
+        public init(tokenProvider: TokenProvider) {
+            super.init(tokenProvider, "\(self.baseUrl)")
         }
     
     \(generatedSchemas)
