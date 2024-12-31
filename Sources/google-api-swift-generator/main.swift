@@ -407,7 +407,7 @@ extension Discovery.Service {
     import OAuth2
     import GoogleAPIRuntime
     
-    public class \(self.name.capitalized()) : Service, Sendable {
+    public final class \(self.name.capitalized()) : Service, Sendable {
         public init(tokenProvider: TokenProvider) {
             super.init(tokenProvider, "\(self.baseUrl)")
         }
