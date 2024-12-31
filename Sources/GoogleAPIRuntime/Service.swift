@@ -101,7 +101,7 @@ extension Parameterizable {
 }
 
 // general connection helper
-open class Service: NSObject {
+open class Service {
   var connection : Connection
   var base : String
   
